@@ -29,6 +29,7 @@ import numpy as np
 
 from popart.detection import FaceBox, FaceDetector
 from popart.exceptions import InvalidParameters, MissingInput, NoFaceDetected
+from popart.segmentation import Segmenter, clean_mask
 
 TILE_SIZE = 512                  # default size of the side of the portrait, in pixels
 TILE_SIZES = (384, 512, 768, 1024)
@@ -250,4 +251,34 @@ class Ink(Step):
         """The ink printed on white paper."""
         return print_ink(np.full((*work.edges.shape, 3), 255, np.uint8), work.edges)
 
-STEPS: tuple[type[Step], ...] = (Frame,)
+# 3 · Background: separate the person and make the background flat
+
+class Background(Step):
+    number, name, label = 3, "background", "Fondo"
+    requires, optional, produces = ("image",), ("face", "edges"), ("mask",)
+
+    def __init__(self, segmenter: Segmenter, smoothness: int = 3, edge: int = 0) -> None:
+        check_range("Suavidad del contorno", smoothness, 0, 10)
+        check_range("Borde", edge, -10, 10)
+        self.segmenter, self.smoothness, self.edge = segmenter, smoothness, edge
+
+    def apply(self, work: Work) -> Work:
+        # The color photo is used to detect the person: color separates the person and the background
+        # much better than gray.
+        raw = self.segmenter.segment(work.image, work.face)
+        image = work.image
+        return work.update(mask=clean_mask(raw, scaled(self.smoothness, image), scaled(self.edge, image)))
+
+    def preview(self, work: Work) -> np.ndarray:
+        """The ink of step 2 (or the photo, if step 2 was not done) cut out over a flat background."""
+        person = work.mask > 0
+        if work.edges is not None:
+            figure = print_ink(np.full_like(work.image, 255), work.edges)
+        else:
+            figure = work.image
+        out = np.empty_like(work.image)
+        out[:] = PREVIEW_BACKGROUND
+        out[person] = figure[person]
+        return out
+    
+STEPS: tuple[type[Step], ...] = (Frame,Ink, Background)
