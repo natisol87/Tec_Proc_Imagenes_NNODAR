@@ -4,10 +4,12 @@ Separation of the person and the background.
 The portraits of Warhol have a completely flat background, so the result of
 this step is very important for the final effect.
 
-A pretrained network for person segmentation gives the probability of "person" for each pixel. Its map has low resolution (192×192),
-so only the very probable parts are used as markers, and WATERSHED WITH MARKERS decides the strip around the border, following the real borders of color in the photo.
+A pretrained network for person segmentation (PP-HumanSeg, unit 1, §6.3, executed with
+cv2.dnn) gives the probability of "person" for each pixel. Its map has low resolution (192×192),
+so only the very probable parts are used as markers, and WATERSHED WITH MARKERS (unit 2, §3 and
+unit 7) decides the strip around the border, following the real borders of color in the photo.
 
-After that, a cleaning with contours: keep the
+After that, a cleaning with contours (unit 2, §6, as in TP2): keep the
 biggest contour, draw it filled (this also fills the holes), smooth the border with a
 median filter and, if necessary, make it a few pixels bigger or smaller.
 """

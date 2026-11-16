@@ -1,7 +1,8 @@
 """
 Face parsing: which pixels of the person are skin, hair, clothes and lips.
 
-A pretrained FACE PARSING network (BiSeNet with a ResNet-18 base) executed with cv2.dnn. It assigns to each pixel one of 19 parts of a head (skin,
+A pretrained FACE PARSING network (BiSeNet with a ResNet-18 base, a segmenter of the family of
+unit 1, §6.3) executed with cv2.dnn. It assigns to each pixel one of 19 parts of a head (skin,
 nose, eyes, eyebrows, lips, hair, neck, clothes...). It does not depend on the colors, so it also
 works with warm light at night, lips with little color or hair of the same color as the skin.
 
@@ -84,7 +85,7 @@ class NetworkFaceParser(FaceParser):
         for lip in self.LIP_PARTS:
             scores[lip] += tuning.lips
         labels = scores.argmax(axis=0).astype(np.uint8)
-        # Labels are categories: when they are enlarged, there must not be intermediate values
+        # Labels are categories: when they are enlarged, there must not be intermediate values (INTER_NEAREST, unit 3).
         return cv2.resize(labels, (w, h), interpolation=cv2.INTER_NEAREST)
 
     def parse(self, image: np.ndarray, person: np.ndarray, face: FaceBox, tuning: Tuning = Tuning()) -> FaceParts:

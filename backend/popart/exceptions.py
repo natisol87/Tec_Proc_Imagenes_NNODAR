@@ -12,6 +12,10 @@ class PopArtError(Exception):
     """Base class of all the errors of the core."""
 
 
+class InvalidImage(PopArtError):
+    """It is not possible to open the bytes as an image (empty, damaged, or not an image)."""
+
+
 class NoFaceDetected(PopArtError):
     """The face detector did not find any face in the photo."""
 

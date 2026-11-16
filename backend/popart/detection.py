@@ -1,5 +1,5 @@
 """
-Face detection with YuNet: a small pretrained CNN
+Face detection with YuNet: a small pretrained CNN (unit 1, §6.3, detectors with deep learning)
 in an .onnx file, executed with cv2.FaceDetectorYN. With the rectangle of the face it returns
 the centers of the eyes: step 1 uses them to make the eyes horizontal and step 4 to locate the
 eye shadow.

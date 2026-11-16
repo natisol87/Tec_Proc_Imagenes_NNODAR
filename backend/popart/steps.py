@@ -1,6 +1,8 @@
 """
 The steps that change a portrait into a silkscreen in the style of Warhol.
 
+    photo → 1 Frame → 2 Ink → 3 Background → 4 Zones → 5 Compose
+
 The order is the same as in a real silkscreen: first the black screen (the
 photo in grayscale, the "ink"), then the background is cleaned, and at the
 end the parts of the portrait (skin, hair, clothes, lips, eye shadow) are
@@ -29,6 +31,8 @@ import numpy as np
 
 from popart.detection import FaceBox, FaceDetector
 from popart.exceptions import InvalidParameters, MissingInput, NoFaceDetected
+from popart.palettes import PALETTES, hex_to_rgb
+from popart.parsing import FaceParser, Tuning
 from popart.segmentation import Segmenter, clean_mask
 
 TILE_SIZE = 512                  # default size of the side of the portrait, in pixels
@@ -41,6 +45,12 @@ def scaled(pixels: float, image: np.ndarray) -> int:
     For a bigger or smaller portrait they are scaled, so the result is the same at any size.
     """
     return int(round(pixels * image.shape[1] / TILE_SIZE))
+PREVIEW_BACKGROUND = (255, 230, 0)  # flat yellow background behind the person in the previews
+
+# The zones of the portrait, in the same order as Palette.zones.
+HAIR, SKIN, CLOTHES, LIPS, EYES = 0, 1, 2, 3, 4
+ZONE_COUNT = 5
+ZONE_NAMES = ("pelo", "piel", "ropa", "labios", "sombra de ojos")
 
 
 @dataclass(frozen=True)
@@ -63,6 +73,28 @@ class Work:
 def check_range(label: str, value: float, low: float, high: float) -> None:
     if not low <= value <= high:
         raise InvalidParameters(f"«{label}» tiene que estar entre {low} y {high} (llegó {value}).")
+
+
+def check_choice(label: str, value: str, options) -> None:
+    if value not in options:
+        raise InvalidParameters(f"«{label}» tiene que ser una de: {', '.join(options)} (llegó «{value}»).")
+
+
+def print_ink(colors: np.ndarray, density: np.ndarray) -> np.ndarray:
+    """
+    Prints the ink over the colors with a MULTIPLICATION (unit 4, arithmetic operations):
+    each color is multiplied by (1 − density/255). Density 0 does not change the color,
+    255 changes it to black, and the values in the middle make it darker but the color is
+    still visible, as with a transparent ink.
+    """
+    factor = 1 - density.astype(np.float32)[:, :, None] / 255
+    return np.rint(colors.astype(np.float32) * factor).astype(np.uint8)
+
+
+def silhouette_outline(mask: np.ndarray) -> np.ndarray:
+    """Morphological gradient (unit 2, §4): dilation minus erosion. The result is only the border of the mask."""
+    size = 2 * max(scaled(1, mask), 1) + 1
+    return cv2.morphologyEx(mask, cv2.MORPH_GRADIENT, np.ones((size, size), np.uint8))
 
 
 class Step(ABC):
@@ -89,7 +121,9 @@ class Step(ABC):
         """An RGB image that shows the result of this step (for the frontend)."""
 
 
+# ===========================================================================
 # 1 · Frame: detect the face and cut a square portrait around it
+# ===========================================================================
 
 class Frame(Step):
     number, name, label = 1, "frame", "Encuadre"
@@ -199,7 +233,10 @@ class Frame(Step):
                 cv2.circle(out, point, 4, (255, 230, 0), cv2.FILLED)
         return out
 
+
+# ===========================================================================
 # 2 · Ink: the photo in grayscale, the black screen of the silkscreen
+# ===========================================================================
 
 class Ink(Step):
     """
@@ -222,7 +259,7 @@ class Ink(Step):
         """The photo in grayscale, smoothed and with more local contrast."""
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         if self.smoothing > 0:
-            # BILATERAL filter: it calculates the average of each pixel only with
+            # BILATERAL filter (unit 1, §2 and unit 5, §1.2): it calculates the average of each pixel only with
             # the neighbor pixels of a similar tone. The skin is smoothed, but the edges of the eyes, nose
             # and mouth stay defined, and the ink is cleaner. `smoothing` defines the distance (space) and
             # the difference of tone (color) allowed for the neighbor pixels.
@@ -251,7 +288,10 @@ class Ink(Step):
         """The ink printed on white paper."""
         return print_ink(np.full((*work.edges.shape, 3), 255, np.uint8), work.edges)
 
+
+# ===========================================================================
 # 3 · Background: separate the person and make the background flat
+# ===========================================================================
 
 class Background(Step):
     number, name, label = 3, "background", "Fondo"
@@ -281,7 +321,10 @@ class Background(Step):
         out[person] = figure[person]
         return out
 
+
+# ===========================================================================
 # 4 · Zones: the parts of the portrait, each one with one flat color
+# ===========================================================================
 
 ZONE_PREVIEW = np.array([(70, 70, 70), (235, 195, 175), (120, 130, 210), (210, 30, 40), (40, 190, 210)],
                         np.uint8)
@@ -390,5 +433,80 @@ class Zones(Step):
             out = print_ink(out, work.edges)
         out[work.mask == 0] = 255
         return out
-    
-STEPS: tuple[type[Step], ...] = (Frame,Ink, Background, Zones)
+
+
+# ===========================================================================
+# 5 · Compose: paint each portrait with a palette, print the ink and create the grid
+# ===========================================================================
+
+class Compose(Step):
+    number, name, label = 5, "compose", "Color y grilla"
+    requires, optional, produces = ("labels", "mask"), ("edges",), ("final",)
+
+    CUSTOM_ZONES = {"hair": HAIR, "skin": SKIN, "lips": LIPS, "eyes": EYES}  # zones where the user can change the color
+
+    MAX_SIDE = 2048  # maximum side of the final grid, in pixels
+
+    def __init__(self, palettes: list[str], rows: int = 2, cols: int = 2, outline: bool = True,
+                 custom: list[dict[str, str]] | None = None) -> None:
+        check_range("Filas", rows, 1, 3)
+        check_range("Columnas", cols, 1, 3)
+        if not palettes:
+            raise InvalidParameters("Elegí al menos una paleta.")
+        for name in palettes:
+            check_choice("Paleta", name, list(PALETTES))
+        self.custom = [dict(c or {}) for c in (custom or [])]  # portrait i → {"skin": "#rrggbb", ...}
+        for colors in self.custom:
+            for zone, color in colors.items():
+                check_choice("Zona", zone, list(self.CUSTOM_ZONES))
+                if not (isinstance(color, str) and len(color) == 7 and color[0] == "#"
+                        and all(ch in "0123456789abcdefABCDEF" for ch in color[1:])):
+                    raise InvalidParameters(f"«{color}» no es un color válido (formato #rrggbb).")
+        self.palettes, self.rows, self.cols, self.outline = list(palettes), rows, cols, outline
+
+    def tile_palettes(self) -> list[str]:
+        """One palette for each portrait; when the palettes end, they start again from the first."""
+        return [self.palettes[i % len(self.palettes)] for i in range(self.rows * self.cols)]
+
+    def ink_layer(self, work: Work) -> np.ndarray:
+        """The ink of step 2, only on the person, plus the black outline of the person."""
+        density = np.zeros_like(work.mask)
+        if work.edges is not None:
+            density = np.where(work.mask > 0, work.edges, 0).astype(np.uint8)  # flat background: no ink
+        if self.outline:
+            density = np.maximum(density, silhouette_outline(work.mask))
+        return density
+
+    def tile_colors(self, index: int, palette_name: str) -> np.ndarray:
+        """The LUT of portrait `index`: the colors of the palette, replaced by the colors that the user selected."""
+        lut = PALETTES[palette_name].zone_colors  # a new array: changes here do not modify the palette
+        chosen = self.custom[index] if index < len(self.custom) else {}
+        for zone, color in chosen.items():
+            lut[self.CUSTOM_ZONES[zone]] = hex_to_rgb(color)
+        return lut
+
+    def paint(self, work: Work, palette_name: str, ink: np.ndarray, index: int = 0) -> np.ndarray:
+        palette = PALETTES[palette_name]
+        # LUT: row i = color of zone i. With the zone map as index, all the pixels are painted at the same time.
+        tile = self.tile_colors(index, palette_name)[work.labels]
+        tile[work.mask == 0] = palette.background_rgb  # flat background
+        return print_ink(tile, ink)
+
+    def apply(self, work: Work) -> Work:
+        ink = self.ink_layer(work)
+        tiles = [self.paint(work, name, ink, i) for i, name in enumerate(self.tile_palettes())]
+        # The width of the complete grid is MAX_SIDE px or less (big portraits in a 3×3 grid would be
+        # too heavy to send to the browser): the portraits are reduced with INTER_AREA (unit 3).
+        side = tiles[0].shape[0]
+        fit = min(1.0, self.MAX_SIDE / (side * max(self.rows, self.cols)))
+        if fit < 1.0:
+            small = int(side * fit)
+            tiles = [cv2.resize(tile, (small, small), interpolation=cv2.INTER_AREA) for tile in tiles]
+        rows = [np.hstack(tiles[r * self.cols:(r + 1) * self.cols]) for r in range(self.rows)]
+        return work.update(final=np.vstack(rows))
+
+    def preview(self, work: Work) -> np.ndarray:
+        return work.final
+
+
+STEPS: tuple[type[Step], ...] = (Frame, Ink, Background, Zones, Compose)
