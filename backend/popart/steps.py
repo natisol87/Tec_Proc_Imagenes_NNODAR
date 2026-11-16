@@ -280,5 +280,115 @@ class Background(Step):
         out[:] = PREVIEW_BACKGROUND
         out[person] = figure[person]
         return out
+
+# 4 · Zones: the parts of the portrait, each one with one flat color
+
+ZONE_PREVIEW = np.array([(70, 70, 70), (235, 195, 175), (120, 130, 210), (210, 30, 40), (40, 190, 210)],
+                        np.uint8)
+
+
+class Zones(Step):
+    """
+    Divides the person into skin, hair, clothes, lips and eye shadow, as the color screens of a
+    portrait of Warhol. All the details come from the ink of step 2; each zone is only one flat color.
+    """
+
+    number, name, label = 4, "zones", "Zonas"
+    requires, optional, produces = ("image", "mask"), ("face", "edges"), ("labels",)
+
+    def __init__(self, parser: FaceParser, hair: float = 0.0, lip_boost: float = 0.0,
+                 brows_as_hair: bool = True, smooth: int = 4, eyes: bool = True, eye_size: int = 6,
+                 lips: bool = True, lip_widen: int = 1) -> None:
+        check_range("Límite piel / pelo", hair, -1.5, 1.5)
+        check_range("Sensibilidad de labios", lip_boost, 0.0, 1.5)
+        check_range("Suavizar zonas", smooth, 0, 8)
+        check_range("Tamaño de la sombra de ojos", eye_size, 1, 15)
+        check_range("Engrosar labios", lip_widen, 0, 6)
+        self.parser = parser
+        self.tuning = Tuning(hair, lip_boost, brows_as_hair)
+        self.smooth = smooth  # radius of the median filter that eliminates very small islands in the zone map
+        self.eyes, self.eye_size = eyes, eye_size
+        self.lips, self.lip_widen = lips, lip_widen
+
+    def apply(self, work: Work) -> Work:
+        person = work.mask > 0
+        h, w = person.shape
+        face = work.face or FaceBox(w // 3, h // 5, w // 3, h // 3)  # no face: a face in the center is assumed
+        parts = self.parser.parse(work.image, person, face, self.tuning)
+
+        # Pixels without a zone from the parser: hair if they are above the chin AND near the head;
+        # all the rest (below the chin, or on the sides: shoulders, high collars) is clothes.
+        chin = min(face.y + int(face.height * 1.05), h)
+        x0 = max(face.x - int(face.width * 0.45), 0)
+        x1 = min(face.x + face.width + int(face.width * 0.45), w)
+        labels = np.full((h, w), CLOTHES, np.uint8)
+        labels[:chin, x0:x1] = HAIR
+        labels[parts.clothes > 0] = CLOTHES
+        labels[parts.hair > 0] = HAIR
+        labels[parts.skin > 0] = SKIN
+        # Median filter on the zone map: the very small islands take the zone of their neighbors. It is
+        # applied BEFORE the eyes and lips, because it would eliminate thin details, for example thin lips.
+        if self.smooth > 0:
+            labels = cv2.medianBlur(labels, 2 * scaled(self.smooth, labels) + 1)
+        if self.eyes:
+            labels[(self._eye_shadow(work.image, face) > 0) & (labels == SKIN)] = EYES
+        if self.lips:
+            lips = parts.lips
+            if self.lip_widen > 0:  # a dilation makes thin lips more visible
+                size = 2 * scaled(self.lip_widen, lips) + 1
+                lips = cv2.dilate(lips, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)))
+            labels[(lips > 0) & person] = LIPS
+        labels[~person] = HAIR  # this value is not important: later the background is painted with a flat color
+        return work.update(labels=labels)
+
+    @staticmethod
+    def eye_centers(face: FaceBox) -> tuple[tuple[int, int], tuple[int, int]]:
+        """The eyes of the face detector; if they are not known, the typical proportions of a face."""
+        if face.eyes:
+            return face.eyes
+        y = face.y + face.height * 40 // 100
+        return (face.x + face.width * 31 // 100, y), (face.x + face.width * 69 // 100, y)
+
+    def _eye_shadow(self, image: np.ndarray, face: FaceBox) -> np.ndarray:
+        """
+        The real shape of each eye, extended in the direction of the eyelid:
+
+        1. Around each eye, the threshold of Otsu (unit 5) separates the dark part (eyelashes, iris)
+           from the skin; the biggest dark contour is the eye.
+        2. A DILATION of that shape (unit 2) with a disc of `eye_size` pixels follows its curve.
+        3. Only the part above the center of the eye is kept (the eyelid), minus the eye,
+           so the eye is still visible under the shadow.
+        """
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        h, w = gray.shape
+        (x1, y1), (x2, y2) = self.eye_centers(face)
+        gap = max(int(np.hypot(x2 - x1, y2 - y1)), 10)  # distance between the eyes: the scale of the face
+        shadow = np.zeros((h, w), np.uint8)
+        radius = max(scaled(self.eye_size, image), 1)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
+        for ex, ey in ((x1, y1), (x2, y2)):
+            bx0, bx1 = max(ex - gap * 3 // 10, 0), min(ex + gap * 3 // 10, w)
+            by0, by1 = max(ey - gap * 15 // 100, 0), min(ey + gap * 15 // 100, h)
+            if bx1 - bx0 < 4 or by1 - by0 < 4:
+                continue
+            _, dark = cv2.threshold(gray[by0:by1, bx0:bx1], 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            contours, _ = cv2.findContours(dark, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            if not contours:
+                continue
+            eye = np.zeros((h, w), np.uint8)
+            cv2.drawContours(eye, [max(contours, key=cv2.contourArea) + np.array([bx0, by0])], -1, 255, cv2.FILLED)
+            lid = cv2.dilate(eye, kernel)
+            middle = int(np.nonzero(eye)[0].mean())
+            lid[middle:] = 0
+            shadow |= lid & ~eye
+        return shadow
+
+    def preview(self, work: Work) -> np.ndarray:
+        """Each zone in a neutral color, with the ink over it if step 2 was done."""
+        out = ZONE_PREVIEW[work.labels]
+        if work.edges is not None:
+            out = print_ink(out, work.edges)
+        out[work.mask == 0] = 255
+        return out
     
-STEPS: tuple[type[Step], ...] = (Frame,Ink, Background)
+STEPS: tuple[type[Step], ...] = (Frame,Ink, Background, Zones)
