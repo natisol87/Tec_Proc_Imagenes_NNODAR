@@ -1,19 +1,15 @@
 """
-Domain exceptions of the core.
+Exceptions of the core.
 
-The core only raises these exceptions: it does not know about HTTP. Whoever
-uses it decides how to report them (the API with a status code, the command
-line with a message on stderr). Messages are in Spanish because they reach
-the user as they are.
+The core only raises these exceptions: it does not know HTTP. The code that
+uses the core decides how to show them (the API with a status code, a command
+line program with a message in stderr). The messages are in Spanish because the
+user reads them directly.
 """
 
 
 class PopArtError(Exception):
-    """Base class of every error of the core."""
-
-
-class InvalidImage(PopArtError):
-    """The bytes cannot be opened as an image (empty, corrupt, not an image)."""
+    """Base class of all the errors of the core."""
 
 
 class NoFaceDetected(PopArtError):
@@ -21,11 +17,11 @@ class NoFaceDetected(PopArtError):
 
 
 class InvalidParameters(PopArtError):
-    """A factor of a step is out of its range or has an unknown value."""
+    """A factor of a step is outside its range or has a value that does not exist."""
 
 
 class MissingInput(PopArtError):
-    """A step needs the result of a previous step that was not provided."""
+    """A step needs the result of a previous step, and that result is missing."""
 
     def __init__(self, step_label: str, field: str) -> None:
         super().__init__(f"El paso «{step_label}» necesita «{field}»: primero guardá el paso anterior.")
