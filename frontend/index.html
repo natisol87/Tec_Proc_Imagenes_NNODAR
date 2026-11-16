@@ -4,9 +4,131 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pastiche · Retratos Pop Art</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<h1>PASTICHE</h1>
-<p>Retratos pop art estilo Warhol. En construcción.</p>
+<header class="hero">
+  <h1>PASTICHE</h1>
+  <div class="tagline">Convertí cualquier retrato en una serigrafía estilo Warhol</div>
+</header>
+
+<main>
+  <!-- ============ Origin of the photo ============ -->
+  <section class="panel source" aria-labelledby="source-title">
+    <div class="panel-head">
+      <h2 id="source-title">Tu retrato</h2>
+      <button class="ghost small" id="reset" hidden>Empezar de nuevo</button>
+    </div>
+
+    <div class="source-grid">
+      <div>
+        <div class="tabs" role="tablist">
+          <button role="tab" class="tab active" data-tab="file" aria-selected="true">Archivo</button>
+          <button role="tab" class="tab" data-tab="camera" aria-selected="false">Cámara</button>
+          <button role="tab" class="tab" data-tab="paste" aria-selected="false">Pegar</button>
+          <button role="tab" class="tab" data-tab="url" aria-selected="false">Enlace</button>
+          <button role="tab" class="tab" data-tab="examples" aria-selected="false">Ejemplos</button>
+        </div>
+
+        <div class="tab-panel" data-panel="file">
+          <label class="drop" id="drop">
+            <strong>Soltá una foto acá</strong>
+            <span>o hacé clic para elegirla (JPG, PNG, WEBP)</span>
+            <input type="file" id="file-input" accept="image/*">
+          </label>
+        </div>
+
+        <div class="tab-panel" data-panel="camera" hidden>
+          <div class="camera">
+            <video id="camera-video" playsinline muted></video>
+            <div class="camera-empty" id="camera-empty">La cámara está apagada</div>
+          </div>
+          <div class="row-buttons">
+            <button class="secondary" id="camera-start">Encender cámara</button>
+            <button class="primary" id="camera-shoot" disabled>Sacar foto</button>
+            <button class="ghost" id="camera-flip" disabled>Cambiar cámara</button>
+          </div>
+          <label class="drop small-drop">
+            <span>¿Desde el celular? <strong>Abrir la cámara del teléfono</strong></span>
+            <input type="file" id="camera-input" accept="image/*" capture="user">
+          </label>
+        </div>
+
+        <div class="tab-panel" data-panel="paste" hidden>
+          <div class="paste-box" id="paste-box" tabindex="0">
+            <strong>Copiá una imagen de otra página y pegala acá</strong>
+            <span>Clic derecho sobre la imagen → «Copiar imagen», y después <kbd>Ctrl</kbd> + <kbd>V</kbd></span>
+          </div>
+          <button class="secondary" id="paste-button">Pegar desde el portapapeles</button>
+        </div>
+
+        <div class="tab-panel" data-panel="examples" hidden>
+          <p class="hint">¿No tenés una foto a mano? Probá con una de estas.</p>
+          <div class="examples" id="examples"></div>
+        </div>
+
+        <div class="tab-panel" data-panel="url" hidden>
+          <form class="url-form" id="url-form">
+            <input type="url" id="url-input" placeholder="https://… dirección de la imagen" required>
+            <button class="secondary" type="submit">Traer imagen</button>
+          </form>
+          <p class="hint">Clic derecho sobre una imagen → «Copiar dirección de la imagen». También podés arrastrar la imagen desde otra pestaña.</p>
+        </div>
+      </div>
+
+      <figure class="photo-thumb" id="photo-thumb">
+        <div class="empty-thumb">Todavía no hay foto</div>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ Steps ============ -->
+  <nav class="stepper" id="stepper" aria-label="Pasos"></nav>
+
+  <section class="workbench">
+    <section class="panel factors" aria-labelledby="step-title">
+      <h2 id="step-title">Paso</h2>
+      <p class="step-desc" id="step-desc"></p>
+      <div id="factor-list" class="factor-list"></div>
+      <div class="step-actions">
+        <button class="primary" id="save-step" disabled>Guardar paso</button>
+        <button class="ghost" id="reset-factors">Restablecer factores</button>
+      </div>
+      <button class="secondary wide" id="auto-all" disabled>Completar los pasos que faltan</button>
+      <p class="hint" id="step-hint"></p>
+    </section>
+
+    <section class="panel stage" aria-live="polite">
+      <div class="stage-head">
+        <h2>Vista previa</h2>
+        <span class="badge" id="stage-badge">sin aplicar</span>
+      </div>
+      <div class="stage-frame" id="stage-frame">
+        <div class="stage-empty">Cargá un retrato para empezar</div>
+      </div>
+      <div class="stage-tools">
+        <button class="ghost small" id="compare" disabled>Mantener para ver el antes</button>
+        <span class="meta" id="stage-meta"></span>
+        <a class="download" id="download-step" hidden>Descargar este paso</a>
+      </div>
+    </section>
+  </section>
+
+  <section class="panel saved" aria-labelledby="saved-title">
+    <h2 id="saved-title">Pasos guardados</h2>
+    <div class="saved-strip" id="saved-strip">
+      <p class="hint">Cada paso que guardes aparece acá. Podés volver a cualquiera, cambiar sus factores y guardarlo de nuevo.</p>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="alert" hidden></div>
+
+<footer>Trabajo final · Técnicas de Procesamiento Digital de Imágenes · 2026</footer>
+
+<script src="app.js"></script>
 </body>
 </html>

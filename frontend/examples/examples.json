@@ -1,0 +1,6 @@
+[
+  { "file": "ejemplo1.jpg", "label": "Fondo liso", "credit": "Retrato de frente sobre un fondo gris." },
+  { "file": "ejemplo2.jpg", "label": "Dos caras", "credit": "Dos personas: en el paso 1 se elige cuál convertir." },
+  { "file": "ejemplo3.jpg", "label": "Fondo con ruido", "credit": "Pelo muy claro y un fondo con mucha gente." },
+  { "file": "ejemplo4.jpg", "label": "Cara con arrugas", "credit": "Retrato con el fondo desenfocado y la cara contra el borde." }
+]
