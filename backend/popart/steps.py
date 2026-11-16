@@ -198,5 +198,56 @@ class Frame(Step):
                 cv2.circle(out, point, 4, (255, 230, 0), cv2.FILLED)
         return out
 
+# 2 · Ink: the photo in grayscale, the black screen of the silkscreen
+
+class Ink(Step):
+    """
+    Creates the INK DENSITY layer: 0 = no ink, 255 = completely black. It is the photo in grayscale,
+    as in the silkscreens of Warhol, where the black screen was a photo with high contrast, printed
+    over areas of color. Step 5 prints it over the flat colors with a multiplication: a density
+    of 128 makes the color below 50% darker.
+    """
+
+    number, name, label = 2, "ink", "Escala de grises"
+    requires, produces = ("image",), ("edges",)
+
+    def __init__(self, smoothing: int = 4, contrast: float = 2.0, shadows: float = 1.6) -> None:
+        check_range("Suavizado", smoothing, 0, 10)
+        check_range("Contraste", contrast, 0, 5)
+        check_range("Solo sombras", shadows, 1.0, 4.0)
+        self.smoothing, self.contrast, self.shadows = smoothing, contrast, shadows
+
+    def grayscale(self, image: np.ndarray) -> np.ndarray:
+        """The photo in grayscale, smoothed and with more local contrast."""
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        if self.smoothing > 0:
+            # BILATERAL filter: it calculates the average of each pixel only with
+            # the neighbor pixels of a similar tone. The skin is smoothed, but the edges of the eyes, nose
+            # and mouth stay defined, and the ink is cleaner. `smoothing` defines the distance (space) and
+            # the difference of tone (color) allowed for the neighbor pixels.
+            radius = scaled(self.smoothing, gray)
+            gray = cv2.bilateralFilter(gray, 2 * radius + 1, sigmaColor=12 * self.smoothing, sigmaSpace=3 * radius)
+        if self.contrast > 0:
+            # CLAHE: local histogram equalization with a limit, so the noise does not increase.
+            gray = cv2.createCLAHE(clipLimit=self.contrast, tileGridSize=(8, 8)).apply(gray)
+        return gray
+
+    def ink_table(self) -> np.ndarray:
+        """
+        LUT of 256 values (unit 7, §4.1, gamma correction with a LUT): gray level → ink density.
+        It is the NEGATIVE (light = no ink) with an exponent: with shadows > 1 the middle tones are
+        lighter and only the shadows keep the ink. This gives the high contrast of a silkscreen.
+        """
+        levels = np.arange(256) / 255
+        return np.rint((1 - levels) ** self.shadows * 255).astype(np.uint8)
+
+    def apply(self, work: Work) -> Work:
+        # Contrast stretching to the complete range 0..255 (cv2.normalize with NORM_MINMAX, unit 5).
+        gray = cv2.normalize(self.grayscale(work.image), None, 0, 255, cv2.NORM_MINMAX)
+        return work.update(edges=cv2.LUT(gray, self.ink_table()))
+
+    def preview(self, work: Work) -> np.ndarray:
+        """The ink printed on white paper."""
+        return print_ink(np.full((*work.edges.shape, 3), 255, np.uint8), work.edges)
 
 STEPS: tuple[type[Step], ...] = (Frame,)
