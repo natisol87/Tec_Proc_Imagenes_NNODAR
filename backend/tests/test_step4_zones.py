@@ -127,6 +127,18 @@ def test_tuning_moves_the_border_of_the_network():
     assert (parser.labels(image, Tuning(lips=1.5)) >= 12).sum() >= (plain >= 12).sum()
 
 
+@pytest.mark.parametrize("hat_as_hair", [False, True])
+def test_the_hat_is_clothes_or_hair_as_the_user_selects(hat_as_hair):
+    parser = NetworkFaceParser(str(MODEL))
+    work = portrait()
+    labels = np.zeros(work.mask.shape, np.uint8)
+    labels[10:24, 40:90] = 18          # class 18 of the network: hat
+    parser.labels = lambda image, tuning=None: labels
+    parts = parser.parse(work.image, work.mask > 0, work.face, Tuning(hat_as_hair=hat_as_hair))
+    hat = (labels == 18) & (work.mask > 0)
+    assert (parts.hair[hat] > 0).all() == hat_as_hair
+    assert (parts.clothes[hat] > 0).all() != hat_as_hair
+    
 def test_smoothing_removes_tiny_islands_and_can_be_turned_off():
     work = portrait()
     h, w = work.mask.shape

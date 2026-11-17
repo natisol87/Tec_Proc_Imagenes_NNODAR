@@ -30,7 +30,7 @@ class Tuning:
     hair: float = 0.0           # + more hair, − more skin (added to the score of "hair")
     lips: float = 0.0           # + more lips (added to the scores of the two lips)
     brows_as_hair: bool = True  # eyebrows with the color of the hair, or as skin
-
+    hat_as_hair: bool = False   # hat with the color of the hair, or with the color of the clothes
 
 @dataclass(frozen=True)
 class FaceParts:
@@ -63,7 +63,8 @@ class NetworkFaceParser(FaceParser):
     SKIN_PARTS = (1, 4, 5, 6, 7, 8, 9, 10, 11, 14)  # skin, eyes, glasses, ears, earring, nose, mouth, neck
     BROWS = (2, 3)                                  # eyebrows: hair or skin, as the user selects
     LIP_PARTS = (12, 13)                            # upper lip, lower lip
-    HAIR_PARTS = (17, 18)                           # hair, hat
+    HAIR_PARTS = (17,)                              # hair
+    HAT = (18,)                                     # hat: hair or clothes, as the user selects
     CLOTHES_PARTS = (15, 16)                        # necklace, cloth
     HAIR = 17
 
@@ -90,8 +91,10 @@ class NetworkFaceParser(FaceParser):
 
     def parse(self, image: np.ndarray, person: np.ndarray, face: FaceBox, tuning: Tuning = Tuning()) -> FaceParts:
         labels = self.labels(image, tuning)
-        hair_parts = self.HAIR_PARTS + (self.BROWS if tuning.brows_as_hair else ())
+        hair_parts = self.HAIR_PARTS + (self.BROWS if tuning.brows_as_hair else ()) + (
+            self.HAT if tuning.hat_as_hair else ())
         skin_parts = self.SKIN_PARTS + (() if tuning.brows_as_hair else self.BROWS)
+        clothes_parts = self.CLOTHES_PARTS + (() if tuning.hat_as_hair else self.HAT)
         hair = np.isin(labels, hair_parts) & person
         # A "hat" or "hair" below the chin is usually a collar or a helmet: step 4 decides it,
         # and it paints the part below the chin as clothes. Long hair on the shoulders is kept.
@@ -104,7 +107,7 @@ class NetworkFaceParser(FaceParser):
         return FaceParts(skin=self.connected_to_face(mask_of(skin), face),
                          lips=mask_of(np.isin(labels, self.LIP_PARTS) & person),
                          hair=mask_of(hair),
-                         clothes=mask_of(np.isin(labels, self.CLOTHES_PARTS) & person))
+                         clothes=mask_of(np.isin(labels, clothes_parts) & person))
 
     @staticmethod
     def connected_to_face(skin: np.ndarray, face: FaceBox) -> np.ndarray:

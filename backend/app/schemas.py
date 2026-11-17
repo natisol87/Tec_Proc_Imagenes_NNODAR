@@ -74,6 +74,8 @@ class ZonesIn(BaseModel):
                          "más piel; positivo, más pelo.", ge=-1.5, le=1.5, step=0.25)
     brows_as_hair: bool = factor(True, "Cejas como pelo", "Pinta las cejas del color del pelo. "
                                  "Apagado, quedan como piel y solo se ve la tinta.")
+    hat_as_hair: bool = factor(False, "Sombrero como pelo", "Pinta el sombrero o la gorra del color del pelo. "
+                               "Apagado, toma el color de la ropa.")
     smooth: int = factor(4, "Suavizar zonas", "Redondea los bordes entre zonas y quita manchas chicas.",
                          ge=0, le=8, step=1)
     eyes: bool = factor(True, "Sombra de ojos", "Pinta los párpados de su propio color.")
@@ -87,7 +89,7 @@ class ZonesIn(BaseModel):
 
     def to_step(self, models: Models) -> Step:
         return Zones(models.parser(), self.hair, self.lip_boost, self.brows_as_hair, self.smooth,
-                     self.eyes, self.eye_size, self.lips, self.lip_widen)
+                     self.eyes, self.eye_size, self.lips, self.lip_widen, self.hat_as_hair)
 
 
 HexColor = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]

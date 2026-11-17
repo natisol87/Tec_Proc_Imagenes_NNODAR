@@ -78,6 +78,7 @@ class PopArtOptions:
     eye_size: int = 6
     lips: bool = True
     lip_widen: int = 1
+    hat_as_hair: bool = False
     # 5 · Compose
     palettes: tuple[str, ...] = DEFAULT_PALETTES
     rows: int = 2
@@ -111,7 +112,7 @@ class PopArtMaker:
             Ink(o.smoothing, o.contrast, o.shadows),
             Background(self.models.segmenter(), o.smoothness, o.edge),
             Zones(self.models.parser(), o.hair, o.lip_boost, o.brows_as_hair, o.smooth, o.eyes, o.eye_size, o.lips,
-                  o.lip_widen),
+                  o.lip_widen, o.hat_as_hair),
             Compose(list(o.palettes), o.rows, o.cols, o.outline),
         ]
 

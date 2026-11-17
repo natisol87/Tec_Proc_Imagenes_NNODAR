@@ -341,14 +341,14 @@ class Zones(Step):
 
     def __init__(self, parser: FaceParser, hair: float = 0.0, lip_boost: float = 0.0,
                  brows_as_hair: bool = True, smooth: int = 4, eyes: bool = True, eye_size: int = 6,
-                 lips: bool = True, lip_widen: int = 1) -> None:
+                 lips: bool = True, lip_widen: int = 1, hat_as_hair: bool = False) -> None:
         check_range("Límite piel / pelo", hair, -1.5, 1.5)
         check_range("Sensibilidad de labios", lip_boost, 0.0, 1.5)
         check_range("Suavizar zonas", smooth, 0, 8)
         check_range("Tamaño de la sombra de ojos", eye_size, 1, 15)
         check_range("Engrosar labios", lip_widen, 0, 6)
         self.parser = parser
-        self.tuning = Tuning(hair, lip_boost, brows_as_hair)
+        self.tuning = Tuning(hair, lip_boost, brows_as_hair, hat_as_hair)
         self.smooth = smooth  # radius of the median filter that eliminates very small islands in the zone map
         self.eyes, self.eye_size = eyes, eye_size
         self.lips, self.lip_widen = lips, lip_widen
