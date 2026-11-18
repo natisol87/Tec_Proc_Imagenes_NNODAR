@@ -6,6 +6,7 @@ import pytest
 from helpers import colors_of, work_for_compose
 from popart import PALETTES, Compose, InvalidParameters
 from popart.palettes import delta_e
+from popart.steps import EYES
 
 SIZE = 128
 
@@ -34,15 +35,41 @@ def test_ink_is_printed_by_multiplication():
     work = work.update(edges=np.full_like(work.mask, 128))
     without = Compose(["marilyn"], 1, 1, outline=False).run(work.update(edges=None)).final.astype(int)
     with_ink = Compose(["marilyn"], 1, 1, outline=False).run(work).final.astype(int)
-    person = work.mask > 0
+    inked = (work.mask > 0) & (work.labels != EYES)  # the eye shadow is a solid color (next test)
     expected = np.rint(without * (1 - 128 / 255))
-    assert np.abs(with_ink[person] - expected[person]).max() <= 1
+    assert np.abs(with_ink[inked] - expected[inked]).max() <= 1
+
+
+def test_no_ink_on_the_eye_shadow():
+    work = work_for_compose().update(edges=np.full((SIZE, SIZE), 255, np.uint8))
+    tile = Compose(["marilyn"], 1, 1, outline=False).run(work).final
+    shadow = (work.mask > 0) & (work.labels == EYES)
+    assert colors_of(tile[shadow]) == {tuple(PALETTES["marilyn"].zone_colors[EYES])}
 
 
 def test_no_ink_on_the_background():
     work = work_for_compose().update(edges=np.full((SIZE, SIZE), 255, np.uint8))
     tile = Compose(["marilyn"], 1, 1, outline=False).run(work).final
     assert colors_of(tile[work.mask == 0]) == {tuple(PALETTES["marilyn"].background_rgb)}
+
+
+def test_a_thicker_outline_covers_more_pixels():
+    work = work_for_compose(512).update(edges=None)  # the widths are calibrated for portraits of 512 px
+    thin = (Compose(["marilyn"], 1, 1, outline=1).ink_layer(work) > 0).sum()
+    thick = (Compose(["marilyn"], 1, 1, outline=5).ink_layer(work) > 0).sum()
+    none = (Compose(["marilyn"], 1, 1, outline=0).ink_layer(work) > 0).sum()
+    assert none == 0 < thin < thick
+
+
+def test_opacity_mixes_the_color_with_the_photo():
+    """Opacity 0.5: each painted pixel is the average of the color of its zone and the photo (unit 4)."""
+    work = work_for_compose().update(edges=None)
+    photo = np.full((SIZE, SIZE, 3), 100, np.uint8)
+    flat = Compose(["marilyn"], 1, 1, outline=0).run(work).final.astype(int)
+    mixed = Compose(["marilyn"], 1, 1, outline=0, opacity=0.5).run(work.update(image=photo)).final.astype(int)
+    person = work.mask > 0
+    assert np.abs(mixed[person] - (flat[person] + 100) / 2).max() <= 1
+    assert np.array_equal(mixed[~person], flat[~person])  # the background stays flat
 
 
 def test_outline_is_dilation_minus_erosion():

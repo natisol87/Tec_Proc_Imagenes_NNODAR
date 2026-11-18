@@ -12,8 +12,8 @@ Cada paso se ajusta con sus factores y se guarda antes de pasar al siguiente.
 | 1 · Encuadre | Detecta las caras (si hay varias, se elige cuál), endereza la cara y recorta un retrato cuadrado con más nitidez | YuNet (red preentrenada: cara y ojos), rotación afín, interpolación, máscara de desenfoque |
 | 2 · Escala de grises | La foto en grises que se imprime como tinta sobre los colores | Filtro bilateral, CLAHE, normalización de contraste, negativo con curva gamma aplicada con LUT |
 | 3 · Fondo | Separa a la persona para dejar el fondo liso | PP-HumanSeg (red preentrenada) como marcadores + watershed, mediana, dilatación/erosión |
-| 4 · Zonas | Define piel, pelo, ropa, labios y sombra de ojos | Face parsing (BiSeNet), componentes conexas, mediana, dilatación; sombra de ojos con Otsu |
-| 5 · Color y grilla | Pinta cada zona con una paleta, imprime la tinta y arma la grilla | LUT, máscaras, multiplicación de imágenes, gradiente morfológico |
+| 4 · Zonas | Define piel, pelo, ropa, labios y sombra de ojos | Face parsing (BiSeNet), componentes conexas, mediana, dilatación; sombra de ojos con umbral de Otsu, apertura, componentes conexas y una parábola ajustada al borde del ojo |
+| 5 · Color y grilla | Pinta cada zona con una paleta, imprime la tinta y arma la grilla | LUT, máscaras, mezcla ponderada (opacidad), multiplicación de imágenes, gradiente morfológico (contorno) |
 
 ## Estructura
 

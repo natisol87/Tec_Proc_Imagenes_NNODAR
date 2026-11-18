@@ -289,6 +289,8 @@ function inputsFor(step) {
   const missing = [];
   const earlier = state.steps.slice(0, stepIndex(step.name)).reverse();
   for (const field of [...step.requires, ...step.optional]) {
+    // Step 5 only uses the photo when the zones are transparent: if not, it is not sent (smaller request).
+    if (step.name === "compose" && field === "image" && (factorsOf(step.name).opacity ?? 1) >= 1) continue;
     if (field === "photo") {
       if (state.photo) inputs.photo = state.photo;
       else missing.push("la foto");
@@ -476,7 +478,7 @@ function factorControl(step, factor, values) {
     }
     box.append(group);
   } else if (s.type === "boolean") {
-    box.innerHTML = `<label class="switch"><input type="checkbox" id="${id}" ${values[factor.name] ? "checked" : ""}> ${s.title}</label>${help}`;
+    box.innerHTML = `<label class="switch" for="${id}"><span>${s.title}</span><input type="checkbox" id="${id}" ${values[factor.name] ? "checked" : ""}></label>${help}`;
     box.querySelector("input").addEventListener("change", (e) => {
       values[factor.name] = e.target.checked;
       factorChanged();

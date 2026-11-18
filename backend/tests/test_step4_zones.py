@@ -138,7 +138,21 @@ def test_the_hat_is_clothes_or_hair_as_the_user_selects(hat_as_hair):
     hat = (labels == 18) & (work.mask > 0)
     assert (parts.hair[hat] > 0).all() == hat_as_hair
     assert (parts.clothes[hat] > 0).all() != hat_as_hair
-    
+
+
+def test_the_eyebrows_are_never_painted():
+    """The eyebrows (classes 2 and 3) are skin: only the ink of step 2 shows them."""
+    parser = NetworkFaceParser(str(MODEL))
+    work = portrait()
+    labels = np.zeros(work.mask.shape, np.uint8)
+    labels[34:38, 50:60] = 2
+    labels[34:38, 68:78] = 3
+    parser.labels = lambda image, tuning=None: labels
+    parts = parser.parse(work.image, work.mask > 0, work.face)
+    brows = (labels > 0) & (work.mask > 0)
+    assert not parts.hair[brows].any() and parts.skin[brows].all()
+
+
 def test_smoothing_removes_tiny_islands_and_can_be_turned_off():
     work = portrait()
     h, w = work.mask.shape

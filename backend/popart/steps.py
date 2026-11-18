@@ -91,9 +91,12 @@ def print_ink(colors: np.ndarray, density: np.ndarray) -> np.ndarray:
     return np.rint(colors.astype(np.float32) * factor).astype(np.uint8)
 
 
-def silhouette_outline(mask: np.ndarray) -> np.ndarray:
-    """Morphological gradient (unit 2, §4): dilation minus erosion. The result is only the border of the mask."""
-    size = 2 * max(scaled(1, mask), 1) + 1
+def silhouette_outline(mask: np.ndarray, width: int = 1) -> np.ndarray:
+    """
+    Morphological gradient (unit 2, §4): dilation minus erosion. The result is only the border of the mask,
+    and a bigger kernel (`width`) gives a thicker border.
+    """
+    size = 2 * max(scaled(width, mask), 1) + 1
     return cv2.morphologyEx(mask, cv2.MORPH_GRADIENT, np.ones((size, size), np.uint8))
 
 
@@ -340,7 +343,7 @@ class Zones(Step):
     requires, optional, produces = ("image", "mask"), ("face", "edges"), ("labels",)
 
     def __init__(self, parser: FaceParser, hair: float = 0.0, lip_boost: float = 0.0,
-                 brows_as_hair: bool = True, smooth: int = 4, eyes: bool = True, eye_size: int = 6,
+                 smooth: int = 4, eyes: bool = True, eye_size: int = 6,
                  lips: bool = True, lip_widen: int = 1, hat_as_hair: bool = False) -> None:
         check_range("Límite piel / pelo", hair, -1.5, 1.5)
         check_range("Sensibilidad de labios", lip_boost, 0.0, 1.5)
@@ -348,7 +351,7 @@ class Zones(Step):
         check_range("Tamaño de la sombra de ojos", eye_size, 1, 15)
         check_range("Engrosar labios", lip_widen, 0, 6)
         self.parser = parser
-        self.tuning = Tuning(hair, lip_boost, brows_as_hair, hat_as_hair)
+        self.tuning = Tuning(hair, lip_boost, hat_as_hair)
         self.smooth = smooth  # radius of the median filter that eliminates very small islands in the zone map
         self.eyes, self.eye_size = eyes, eye_size
         self.lips, self.lip_widen = lips, lip_widen
@@ -374,7 +377,7 @@ class Zones(Step):
         if self.smooth > 0:
             labels = cv2.medianBlur(labels, 2 * scaled(self.smooth, labels) + 1)
         if self.eyes:
-            labels[(self._eye_shadow(work.image, face) > 0) & (labels == SKIN)] = EYES
+            labels[(self._eye_shadow(work.image, face, parts.skin) > 0) & (labels == SKIN)] = EYES
         if self.lips:
             lips = parts.lips
             if self.lip_widen > 0:  # a dilation makes thin lips more visible
@@ -392,45 +395,73 @@ class Zones(Step):
         y = face.y + face.height * 40 // 100
         return (face.x + face.width * 31 // 100, y), (face.x + face.width * 69 // 100, y)
 
-    def _eye_shadow(self, image: np.ndarray, face: FaceBox) -> np.ndarray:
+    def _eye_shadow(self, image: np.ndarray, face: FaceBox, skin: np.ndarray) -> np.ndarray:
         """
-        The real shape of each eye, extended in the direction of the eyelid:
+        A flat band of color on the upper eyelid that follows the curve of each eye:
 
         1. Around each eye, the threshold of Otsu (unit 5) separates the dark part (eyelashes, iris)
-           from the skin; the biggest dark contour is the eye.
-        2. A DILATION of that shape (unit 2) with a disc of `eye_size` pixels follows its curve.
-        3. Only the part above the center of the eye is kept (the eyelid), minus the eye,
-           so the eye is still visible under the shadow.
+           from the skin, only inside the skin of the network (so the hair is not taken). Connected
+           components (unit 1, §4): only the darkest region is kept, so the fold of the eyelid, a
+           wrinkle or the eyebrow is not taken as the eye.
+        2. An OPENING (unit 2) cuts the thin bridges between the eye and the hair or the fold.
+        3. In each column, the first dark row is the upper edge of the eye (the eyelashes). A parabola
+           fitted to those rows makes the edge a smooth curve; the columns far from it are ignored.
+        4. From that edge, a band goes up: it is higher in the middle and thinner at the corners
+           (half an ellipse), and its height grows with `eye_size`.
+        Step 5 does not print ink over it, so it is a solid color, as the eyelids of the Marilyn of Warhol.
         """
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         h, w = gray.shape
         (x1, y1), (x2, y2) = self.eye_centers(face)
         gap = max(int(np.hypot(x2 - x1, y2 - y1)), 10)  # distance between the eyes: the scale of the face
+        height = gap * 8 // 100 + max(scaled(self.eye_size, image), 1)
         shadow = np.zeros((h, w), np.uint8)
-        radius = max(scaled(self.eye_size, image), 1)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
         for ex, ey in ((x1, y1), (x2, y2)):
-            bx0, bx1 = max(ex - gap * 3 // 10, 0), min(ex + gap * 3 // 10, w)
-            by0, by1 = max(ey - gap * 15 // 100, 0), min(ey + gap * 15 // 100, h)
+            dx, up, down = max(gap * 30 // 100, 4), max(gap * 15 // 100, 3), max(gap * 12 // 100, 3)
+            bx0, bx1 = max(ex - dx, 0), min(ex + dx, w)
+            by0, by1 = max(ey - up, 0), min(ey + down, h)
             if bx1 - bx0 < 4 or by1 - by0 < 4:
                 continue
             _, dark = cv2.threshold(gray[by0:by1, bx0:bx1], 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-            contours, _ = cv2.findContours(dark, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-            if not contours:
+            dark &= skin[by0:by1, bx0:bx1]  # only inside the skin of the network (the eyes are skin): not the hair
+            # OPENING (unit 2): cuts the thin bridges between the eye and the hair or the fold of the eyelid.
+            k = 2 * max(gap // 60, 1) + 1
+            dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+            count, components = cv2.connectedComponents(dark)
+            if count < 2:
                 continue
-            eye = np.zeros((h, w), np.uint8)
-            cv2.drawContours(eye, [max(contours, key=cv2.contourArea) + np.array([bx0, by0])], -1, 255, cv2.FILLED)
-            lid = cv2.dilate(eye, kernel)
-            middle = int(np.nonzero(eye)[0].mean())
-            lid[middle:] = 0
-            shadow |= lid & ~eye
+            # The eye is the DARKEST region (eyelashes and iris are darker than wrinkles, the fold of the
+            # eyelid or the eyebrow), among the regions that are not too small.
+            box = gray[by0:by1, bx0:bx1]
+            sizes = np.bincount(components.ravel())[1:]
+            candidates = [i + 1 for i in range(count - 1) if sizes[i] >= 0.2 * sizes.max()]
+            darkest = min(candidates, key=lambda i: box[components == i].mean())
+            eye = components == darkest
+            columns = np.nonzero(eye.any(axis=0))[0]
+            if len(columns) < 3:
+                continue
+            top = eye[:, columns].argmax(axis=0)  # first dark row of each column
+            # The edge of an eyelid is a smooth curve: a parabola fitted by least squares to those rows.
+            # The columns far from the first curve (loose eyelashes, hair) are ignored in a second fit.
+            curve = np.polyfit(columns, top, 2)
+            error = np.abs(np.polyval(curve, columns) - top)
+            good = error <= max(2 * np.median(error), 1)
+            if good.sum() >= 3:
+                curve = np.polyfit(columns[good], top[good], 2)
+                columns = np.arange(columns[good][0], columns[good][-1] + 1)  # every column, without gaps
+            top = np.rint(np.polyval(curve, columns)).astype(int) + by0
+            half = (columns[-1] - columns[0]) / 2
+            middle = (columns[-1] + columns[0]) / 2
+            for col, edge in zip(columns + bx0, top):
+                band = int(height * np.sqrt(max(0.0, 1 - ((col - bx0 - middle) / (half + 1)) ** 2)))
+                shadow[max(edge - band, 0):edge, col] = 255
         return shadow
 
     def preview(self, work: Work) -> np.ndarray:
         """Each zone in a neutral color, with the ink over it if step 2 was done."""
         out = ZONE_PREVIEW[work.labels]
         if work.edges is not None:
-            out = print_ink(out, work.edges)
+            out = print_ink(out, np.where(work.labels == EYES, 0, work.edges).astype(np.uint8))
         out[work.mask == 0] = 255
         return out
 
@@ -441,16 +472,19 @@ class Zones(Step):
 
 class Compose(Step):
     number, name, label = 5, "compose", "Color y grilla"
-    requires, optional, produces = ("labels", "mask"), ("edges",), ("final",)
+    requires, optional, produces = ("labels", "mask"), ("edges", "image"), ("final",)
 
     CUSTOM_ZONES = {"hair": HAIR, "skin": SKIN, "lips": LIPS, "eyes": EYES}  # zones where the user can change the color
 
     MAX_SIDE = 2048  # maximum side of the final grid, in pixels
 
-    def __init__(self, palettes: list[str], rows: int = 2, cols: int = 2, outline: bool = True,
-                 custom: list[dict[str, str]] | None = None) -> None:
+    def __init__(self, palettes: list[str], rows: int = 2, cols: int = 2, outline: int = 1,
+                 custom: list[dict[str, str]] | None = None, opacity: float = 1.0) -> None:
         check_range("Filas", rows, 1, 3)
         check_range("Columnas", cols, 1, 3)
+        check_range("Grosor del contorno", outline, 0, 10)
+        check_range("Opacidad de las zonas", opacity, 0.0, 1.0)
+        self.opacity = opacity  # 1 = flat colors; less = the photo is visible under the colors
         if not palettes:
             raise InvalidParameters("Elegí al menos una paleta.")
         for name in palettes:
@@ -473,8 +507,9 @@ class Compose(Step):
         density = np.zeros_like(work.mask)
         if work.edges is not None:
             density = np.where(work.mask > 0, work.edges, 0).astype(np.uint8)  # flat background: no ink
-        if self.outline:
-            density = np.maximum(density, silhouette_outline(work.mask))
+        density[work.labels == EYES] = 0  # the eye shadow is a solid color, without ink over it
+        if self.outline > 0:  # thickness of the outline, in pixels (0 = no outline)
+            density = np.maximum(density, silhouette_outline(work.mask, self.outline))
         return density
 
     def tile_colors(self, index: int, palette_name: str) -> np.ndarray:
@@ -489,6 +524,10 @@ class Compose(Step):
         palette = PALETTES[palette_name]
         # LUT: row i = color of zone i. With the zone map as index, all the pixels are painted at the same time.
         tile = self.tile_colors(index, palette_name)[work.labels]
+        if self.opacity < 1 and work.image is not None:
+            # WEIGHTED MIX (unit 4, cv2.addWeighted): opacity × color + (1 − opacity) × photo. The zones are
+            # transparent and the colors of the photo are visible under them.
+            tile = cv2.addWeighted(tile, self.opacity, work.image, 1 - self.opacity, 0)
         tile[work.mask == 0] = palette.background_rgb  # flat background
         return print_ink(tile, ink)
 

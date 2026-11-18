@@ -72,7 +72,6 @@ class PopArtOptions:
     # 4 · Zones
     hair: float = 0.0
     lip_boost: float = 0.0
-    brows_as_hair: bool = True
     smooth: int = 4
     eyes: bool = True
     eye_size: int = 6
@@ -83,7 +82,8 @@ class PopArtOptions:
     palettes: tuple[str, ...] = DEFAULT_PALETTES
     rows: int = 2
     cols: int = 2
-    outline: bool = True
+    outline: int = 1
+    opacity: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -111,9 +111,9 @@ class PopArtMaker:
             Frame(self.models.detector(), o.margin, o.offset, o.size, o.sharpen, o.face, o.straighten),
             Ink(o.smoothing, o.contrast, o.shadows),
             Background(self.models.segmenter(), o.smoothness, o.edge),
-            Zones(self.models.parser(), o.hair, o.lip_boost, o.brows_as_hair, o.smooth, o.eyes, o.eye_size, o.lips,
+            Zones(self.models.parser(), o.hair, o.lip_boost, o.smooth, o.eyes, o.eye_size, o.lips,
                   o.lip_widen, o.hat_as_hair),
-            Compose(list(o.palettes), o.rows, o.cols, o.outline),
+            Compose(list(o.palettes), o.rows, o.cols, o.outline, None, o.opacity),
         ]
 
     def run(self, photo: np.ndarray, options: PopArtOptions = PopArtOptions()) -> Trace:

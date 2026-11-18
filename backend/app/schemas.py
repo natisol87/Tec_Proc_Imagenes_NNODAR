@@ -16,10 +16,13 @@ from popart import DEFAULT_PALETTES, PALETTES, Background, Compose, Frame, Ink, 
 PaletteName = Literal[tuple(PALETTES)]
 
 
-def factor(default, title: str, description: str, **extra):
-    """A Field with the additional keys that the frontend uses (`step`, `options`, `unit`)."""
+def factor(default, title: str, description: str = "", **extra):
+    """
+    A Field with the additional keys that the frontend uses (`step`, `options`, `unit`).
+    The description is optional: without it, the frontend shows only the name of the factor.
+    """
     limits = {k: extra.pop(k) for k in ("ge", "le") if k in extra}
-    return Field(default, title=title, description=description, json_schema_extra=extra or None, **limits)
+    return Field(default, title=title, description=description or None, json_schema_extra=extra or None, **limits)
 
 
 # ===========================================================================
@@ -32,16 +35,13 @@ class FrameIn(BaseModel):
                                                 options={"384": "384 px", "512": "512 px", "768": "768 px",
                                                          "1024": "1024 px"})
     margin: float = factor(0.9, "Margen alrededor de la cara",
-                           "Cuánto espacio dejar alrededor de la cara, en tamaños de cara.",
                            ge=0.3, le=2.0, step=0.05)
     offset: float = factor(0.25, "Desplazamiento vertical",
-                           "Corre el encuadre hacia abajo (+) para incluir hombros, o hacia arriba (−).",
                            ge=-0.5, le=0.5, step=0.05)
     straighten: bool = factor(True, "Enderezar la cara", "Rota la foto para que los ojos queden a la misma "
-                              "altura, como en los retratos de Warhol.")
+                              "altura.")
     face: int = factor(0, "Cara", "Si la foto tiene varias caras, elegí cuál convertir.", ge=0, le=20, kind="face")
-    sharpen: float = factor(0.5, "Nitidez", "Realza los detalles con una máscara de desenfoque. "
-                            "Útil si la foto es chica y hubo que agrandarla. 0 = sin cambios.",
+    sharpen: float = factor(0.5, "Nitidez",
                             ge=0.0, le=2.0, step=0.1)
 
     def to_step(self, models: Models) -> Step:
@@ -51,7 +51,7 @@ class FrameIn(BaseModel):
 class InkIn(BaseModel):
     smoothing: int = factor(4, "Suavizado", "Filtro bilateral: alisa la piel pero deja nítidos los bordes de "
                             "ojos, nariz y boca. 0 = apagado.", ge=0, le=10, step=1)
-    contrast: float = factor(2.0, "Contraste", "Contraste local (CLAHE). 0 = apagado.", ge=0, le=5, step=0.1)
+    contrast: float = factor(2.0, "Contraste", ge=0, le=5, step=0.1)
     shadows: float = factor(1.6, "Solo sombras", "Más alto = solo las zonas oscuras llevan tinta.",
                             ge=1.0, le=4.0, step=0.1)
 
@@ -72,8 +72,6 @@ class BackgroundIn(BaseModel):
 class ZonesIn(BaseModel):
     hair: float = factor(0.0, "Límite piel / pelo", "Corre el borde entre la piel y el pelo: negativo, "
                          "más piel; positivo, más pelo.", ge=-1.5, le=1.5, step=0.25)
-    brows_as_hair: bool = factor(True, "Cejas como pelo", "Pinta las cejas del color del pelo. "
-                                 "Apagado, quedan como piel y solo se ve la tinta.")
     hat_as_hair: bool = factor(False, "Sombrero como pelo", "Pinta el sombrero o la gorra del color del pelo. "
                                "Apagado, toma el color de la ropa.")
     smooth: int = factor(4, "Suavizar zonas", "Redondea los bordes entre zonas y quita manchas chicas.",
@@ -88,7 +86,7 @@ class ZonesIn(BaseModel):
                             ge=0, le=6, step=1, unit="px")
 
     def to_step(self, models: Models) -> Step:
-        return Zones(models.parser(), self.hair, self.lip_boost, self.brows_as_hair, self.smooth,
+        return Zones(models.parser(), self.hair, self.lip_boost, self.smooth,
                      self.eyes, self.eye_size, self.lips, self.lip_widen, self.hat_as_hair)
 
 
@@ -112,11 +110,14 @@ class ComposeIn(BaseModel):
     custom: list[ZoneColorsIn] = factor([], "Colores elegidos",
                                         "Pelo, piel, labios y sombra de ojos de cada cuadro, si se cambiaron.",
                                         kind="custom")
-    outline: bool = factor(True, "Contorno de la silueta", "Dibuja el borde de la figura en negro.")
+    opacity: float = factor(1.0, "Opacidad de las zonas", "1 = colores planos. Más bajo, se ve la foto debajo "
+                            "de los colores.", ge=0.0, le=1.0, step=0.05)
+    outline_width: int = factor(1, "Grosor del contorno", "Ancho del borde negro de la figura. 0 = sin contorno.",
+                                ge=0, le=10, step=1, unit="px")
 
     def to_step(self, models: Models) -> Step:
         custom = [c.model_dump(exclude_none=True) for c in self.custom]
-        return Compose(list(self.palettes), self.rows, self.cols, self.outline, custom)
+        return Compose(list(self.palettes), self.rows, self.cols, self.outline_width, custom, self.opacity)
 
 
 STEP_PARAMS: dict[str, type[BaseModel]] = {
